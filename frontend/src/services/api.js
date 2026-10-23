@@ -102,6 +102,31 @@ export const deleteBooking = (id, token) => {
   );
 };
 
+export const resendBookingEmail = (id, token, status) => {
+  return api.post(
+    `/bookings/${id}/send-email`,
+    { status },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+};
+
+export const testEmailApi = (payload, token) => {
+  return api.post(
+    "/bookings/test-email",
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+};
+
+
 
 // =====================================
 // USER APIs

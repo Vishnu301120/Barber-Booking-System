@@ -15,7 +15,10 @@ import {
   getAllUsers,
   getServices,
   getBarbers,
+  resendBookingEmail,
+  testEmailApi,
 } from "../services/api";
+
 
 function AdminDashboard() {
   const navigate = useNavigate();
@@ -111,15 +114,25 @@ function AdminDashboard() {
     fetchData();
   }, [token]);
 
-  // Handle status update
+  // Handle status update (confirmed, completed, cancelled trigger nodemailer emails)
   const handleStatusChange = async (bookingId, newStatus) => {
     setActionLoading(true);
     try {
-      await updateBookingStatus(bookingId, newStatus, token);
+      const res = await updateBookingStatus(bookingId, newStatus, token);
       setBookings((prev) =>
         prev.map((b) => (b._id === bookingId ? { ...b, status: newStatus } : b))
       );
-      showNotification(`Booking status updated to ${newStatus}`);
+      if (res.data?.emailSent) {
+        if (res.data?.isTestAccount) {
+          showNotification(`Status updated to "${newStatus}". Test preview logged in terminal (configure EMAIL_USER in .env for real Gmail)`);
+        } else {
+          showNotification(`Status updated to "${newStatus}" & email delivered to customer! ✉️`);
+        }
+      } else if (res.data?.emailError) {
+        showNotification(`Status updated, but email failed: ${res.data.emailError}`, "error");
+      } else {
+        showNotification(`Booking status updated to ${newStatus}`);
+      }
       // Refresh stats in background
       getAdminStats(token).then((res) => {
         if (res.data?.stats) setStats(res.data.stats);
@@ -131,6 +144,59 @@ function AdminDashboard() {
       setActionLoading(false);
     }
   };
+
+  // Resend status email
+  const handleResendEmail = async (bookingId, status) => {
+    if (status === "pending") {
+      showNotification("Please set status to Confirmed, Completed, or Cancelled to send an email", "error");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await resendBookingEmail(bookingId, token, status);
+      if (res.data?.success) {
+        if (res.data?.emailResult?.isTestAccount) {
+          showNotification(`✉️ ${status} email generated via Ethereal test inbox (check server logs for link)`);
+        } else {
+          showNotification(`✉️ ${status} email sent successfully to customer!`);
+        }
+      } else {
+        showNotification(res.data?.emailResult?.error || res.data?.message || "Failed to send email. Check SMTP settings.", "error");
+      }
+    } catch (err) {
+      console.error("Error sending email:", err);
+      showNotification(err.response?.data?.message || "Failed to send email", "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Test Nodemailer configuration
+  const handleTestEmail = async () => {
+    const targetEmail = window.prompt("Enter recipient email address to test Nodemailer:", user?.email || "");
+    if (!targetEmail) return;
+
+    setActionLoading(true);
+    try {
+      const res = await testEmailApi({ email: targetEmail, status: "confirmed" }, token);
+      if (res.data?.success) {
+        if (res.data?.emailResult?.isTestAccount) {
+          showNotification(`⚠️ Test email generated in Ethereal mock inbox! Set EMAIL_USER & EMAIL_PASS in backend/.env for real delivery.`);
+        } else {
+          showNotification(`✅ Test email successfully delivered to ${targetEmail}!`);
+        }
+      } else {
+        showNotification(res.data?.emailResult?.error || res.data?.message || "Test email failed", "error");
+      }
+    } catch (err) {
+      console.error("Error sending test email:", err);
+      showNotification(err.response?.data?.message || "Failed to send test email", "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+
 
   // Handle booking deletion
   const handleDeleteBooking = async (bookingId) => {
@@ -597,13 +663,36 @@ function AdminDashboard() {
                 </select>
               </div>
 
-              <input
-                type="text"
-                placeholder="Search by customer, barber, service..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #ccc", minWidth: "280px" }}
-              />
+              <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  placeholder="Search by customer, barber, service..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #ccc", minWidth: "260px" }}
+                />
+                <button
+                  type="button"
+                  onClick={handleTestEmail}
+                  disabled={actionLoading}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #d1d5db",
+                    background: "#f3f4f6",
+                    color: "#1f2937",
+                    fontWeight: "600",
+                    fontSize: "0.85rem",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                  title="Send a test email using Nodemailer to verify configuration"
+                >
+                  ✉️ Test Nodemailer
+                </button>
+              </div>
             </div>
 
             {loading ? (
@@ -688,20 +777,47 @@ function AdminDashboard() {
                           </select>
                         </td>
                         <td style={{ padding: "14px 16px" }}>
-                          <button
-                            onClick={() => handleDeleteBooking(b._id)}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "#ef4444",
-                              cursor: "pointer",
-                              padding: "4px 8px",
-                              borderRadius: "4px",
-                            }}
-                            title="Delete booking"
-                          >
-                            🗑️ Delete
-                          </button>
+                          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                            {["confirmed", "completed", "cancelled"].includes(b.status) && (
+                              <button
+                                onClick={() => handleResendEmail(b._id, b.status)}
+                                disabled={actionLoading}
+                                style={{
+                                  background: "#f3f4f6",
+                                  border: "1px solid #d1d5db",
+                                  color: "#374151",
+                                  cursor: "pointer",
+                                  padding: "5px 10px",
+                                  borderRadius: "6px",
+                                  fontSize: "0.8rem",
+                                  fontWeight: "600",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  whiteSpace: "nowrap",
+                                }}
+                                title={`Resend ${b.status} email to customer`}
+                              >
+                                ✉️ Resend
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteBooking(b._id)}
+                              disabled={actionLoading}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#ef4444",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                fontSize: "0.85rem",
+                              }}
+                              title="Delete booking"
+                            >
+                              🗑️ Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

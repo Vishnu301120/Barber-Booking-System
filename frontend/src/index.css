@@ -1284,10 +1284,16 @@ button {
   color: #237a3b;
 }
 
+.booking-status.completed {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
 .booking-status.cancelled {
   background: #ffe5e5;
   color: #c62828;
 }
+
 
 
 /* ================================

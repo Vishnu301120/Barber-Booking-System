@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
-import { getMyBookings, deleteBooking } from "../services/api";
+import { getMyBookings, updateBookingStatus, deleteBooking } from "../services/api";
+
 
 function Profile() {
   const navigate = useNavigate();
@@ -62,13 +63,24 @@ function Profile() {
     if (!window.confirm("Are you sure you want to cancel this appointment?")) return;
 
     try {
-      await deleteBooking(bookingId, token);
-      setBookings((prev) => prev.filter((b) => b._id !== bookingId));
+      const res = await updateBookingStatus(bookingId, "cancelled", token);
+      setBookings((prev) =>
+        prev.map((b) => (b._id === bookingId ? { ...b, status: "cancelled" } : b))
+      );
+      if (res.data?.emailSent) {
+        alert("Appointment cancelled. A cancellation email has been sent to your inbox. ✉️");
+      } else if (res.data?.emailError) {
+        alert(`Appointment cancelled, but email could not be delivered: ${res.data.emailError}`);
+      } else {
+        alert("Appointment cancelled successfully.");
+      }
     } catch (err) {
       console.error("Failed to cancel booking:", err);
       alert(err.response?.data?.message || "Failed to cancel appointment");
     }
   };
+
+
 
   // User is not logged in
   if (!user) {
@@ -342,13 +354,14 @@ function Profile() {
                           {booking.status || "Pending"}
                         </span>
 
-                        {booking.status === "pending" && (
+                        {booking.status !== "cancelled" && booking.status !== "completed" && (
                           <button
                             type="button"
                             onClick={() => handleCancelBooking(booking._id)}
                             style={{
                               background: "transparent",
-                              border: "none",
+                              border: "1px solid #fee2e2",
+                              borderRadius: "4px",
                               color: "#dc2626",
                               fontSize: "0.85rem",
                               cursor: "pointer",
@@ -360,6 +373,7 @@ function Profile() {
                             ✕ Cancel
                           </button>
                         )}
+
                       </div>
 
                     ))}
